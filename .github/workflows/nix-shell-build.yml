@@ -10,14 +10,16 @@ on:
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
-        nixos-version: [ "nixos-24.05", "nixos-unstable" ] 
-        bitcoin-ref: [ "master", "v27.1" ]
+        nixos-version: [ "nixos-26.05", "nixos-unstable" ]
+        # shell.nix uses CMake, so only CMake-era refs (>= v29.0) are supported
+        bitcoin-ref: [ "master", "v32.1" ]
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
     - name: Install Nix
-      uses: cachix/install-nix-action@v22
+      uses: cachix/install-nix-action@v31.9.1
       with:
         nix_path: nixpkgs=channel:${{ matrix.nixos-version }}
     - name: Checkout Bitcoin Core
@@ -26,9 +28,11 @@ jobs:
         repository: bitcoin/bitcoin
         ref: ${{ matrix.bitcoin-ref }}
         path: bitcoin
-    - name: Build with nix-shell
-      run: nix-shell --command "cd bitcoin && sh autogen.sh && ./configure --with-boost-libdir=\$NIX_BOOST_LIB_DIR && make -j4"
+    # Note: the shell's aliases (c, m, ut, ft, ...) are not expanded in
+    # non-interactive `nix-shell --command`, so the commands are spelled out.
+    - name: Configure and build with nix-shell
+      run: nix-shell --command "cd bitcoin && cmake -B build -DWITH_ZMQ=ON && cmake --build build -j\$(nproc)"
     - name: Run unit tests with nix-shell
-      run: nix-shell --command "cd bitcoin && make check"
+      run: nix-shell --command "cd bitcoin && ctest --test-dir build -j\$(nproc) --output-on-failure"
     - name: Run functional tests with nix-shell
-      run: nix-shell --command "cd bitcoin && python3 test/functional/test_runner.py"
+      run: nix-shell --command "cd bitcoin && build/test/functional/test_runner.py -j\$(nproc)"
